@@ -4,8 +4,8 @@ import sqlite3
 import threading
 import time
 import uuid
+from queue import Empty, Queue
 from pathlib import Path
-from queue import Queue
 from flask_cors import CORS
 from myUtils.auth import check_cookie
 from flask import Flask, request, jsonify, Response, render_template, send_from_directory
@@ -14,7 +14,40 @@ from myUtils.login import get_tencent_cookie, douyin_cookie_gen, get_ks_cookie, 
 from myUtils.postVideo import post_video_tencent, post_video_DouYin, post_video_ks, post_video_xhs
 
 active_queues = {}
+active_queues_lock = threading.Lock()
 app = Flask(__name__)
+
+
+def ensure_runtime_ready():
+    """Ensure required directories and SQLite tables exist before handling requests."""
+    for subdir in ("videoFile", "cookiesFile", "db"):
+        Path(BASE_DIR / subdir).mkdir(parents=True, exist_ok=True)
+
+    db_path = Path(BASE_DIR / "db" / "database.db")
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_info (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type INTEGER NOT NULL,
+            filePath TEXT NOT NULL,
+            userName TEXT NOT NULL,
+            status INTEGER DEFAULT 0
+        )
+        ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS file_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            filesize REAL,
+            upload_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            file_path TEXT
+        )
+        ''')
+        conn.commit()
+
+
+ensure_runtime_ready()
 
 #允许所有来源跨域访问
 CORS(app)
@@ -63,9 +96,15 @@ def upload_file():
         # 保存文件到指定位置
         uuid_v1 = uuid.uuid1()
         print(f"UUID v1: {uuid_v1}")
-        filepath = Path(BASE_DIR / "videoFile" / f"{uuid_v1}_{file.filename}")
+        safe_name = Path(file.filename).name
+        if not safe_name:
+            return jsonify({"code": 400, "data": None, "msg": "Invalid filename"}), 400
+        video_dir = Path(BASE_DIR / "videoFile")
+        video_dir.mkdir(parents=True, exist_ok=True)
+        saved_name = f"{uuid_v1}_{safe_name}"
+        filepath = video_dir / saved_name
         file.save(filepath)
-        return jsonify({"code":200,"msg": "File uploaded successfully", "data": f"{uuid_v1}_{file.filename}"}), 200
+        return jsonify({"code":200,"msg": "File uploaded successfully", "data": saved_name}), 200
     except Exception as e:
         return jsonify({"code":500,"msg": str(e),"data":None}), 500
 
@@ -78,14 +117,16 @@ def get_file():
         return jsonify({"code": 400, "msg": "filename is required", "data": None}), 400
 
     # 防止路径穿越攻击
-    if '..' in filename or filename.startswith('/'):
+    base_dir = Path(BASE_DIR / "videoFile").resolve()
+    target_path = (base_dir / filename).resolve()
+    if not target_path.is_relative_to(base_dir) or target_path == base_dir:
         return jsonify({"code": 400, "msg": "Invalid filename", "data": None}), 400
 
     # 拼接完整路径
-    file_path = str(Path(BASE_DIR / "videoFile"))
+    file_path = str(base_dir)
 
     # 返回文件
-    return send_from_directory(file_path,filename)
+    return send_from_directory(file_path, target_path.name)
 
 
 @app.route('/uploadSave', methods=['POST'])
@@ -107,10 +148,15 @@ def upload_save():
 
     # 获取表单中的自定义文件名（可选）
     custom_filename = request.form.get('filename', None)
+    original_name = Path(file.filename).name
+    if not original_name:
+        return jsonify({"code": 400, "data": None, "msg": "Invalid filename"}), 400
     if custom_filename:
-        filename = custom_filename + "." + file.filename.split('.')[-1]
+        safe_custom = Path(custom_filename).name
+        ext = original_name.rsplit('.', 1)[-1] if '.' in original_name else ''
+        filename = f"{safe_custom}.{ext}" if ext else safe_custom
     else:
-        filename = file.filename
+        filename = original_name
 
     try:
         # 生成 UUID v1
@@ -119,7 +165,9 @@ def upload_save():
 
         # 构造文件名和路径
         final_filename = f"{uuid_v1}_{filename}"
-        filepath = Path(BASE_DIR / "videoFile" / f"{uuid_v1}_{filename}")
+        video_dir = Path(BASE_DIR / "videoFile")
+        video_dir.mkdir(parents=True, exist_ok=True)
+        filepath = video_dir / final_filename
 
         # 保存文件
         file.save(filepath)
@@ -233,7 +281,11 @@ async def getValidAccounts():
         for row in rows:
             print(row)
         for row in rows_list:
-            flag = await check_cookie(row[1],row[2])
+            try:
+                flag = await check_cookie(row[1], row[2])
+            except Exception as e:
+                print(f"⚠️ 验证账号 {row[3]} Cookie 异常: {e}")
+                flag = False
             if not flag:
                 row[4] = 0
                 cursor.execute('''
@@ -243,6 +295,14 @@ async def getValidAccounts():
                 ''', (0,row[0]))
                 conn.commit()
                 print("✅ 用户状态已更新")
+            elif row[4] != 1:
+                row[4] = 1
+                cursor.execute('''
+                UPDATE user_info 
+                SET status = ? 
+                WHERE id = ?
+                ''', (1, row[0]))
+                conn.commit()
         for row in rows:
             print(row)
         return jsonify(
@@ -378,21 +438,23 @@ def delete_account():
 @app.route('/login')
 def login():
     # 1 小红书 2 视频号 3 抖音 4 快手
-    type = request.args.get('type')
+    login_type = request.args.get('type')
     # 账号名
-    id = request.args.get('id')
+    account_id = request.args.get('id')
+
+    if login_type not in {'1', '2', '3', '4'} or not account_id:
+        return jsonify({"code": 400, "msg": "缺少或非法的平台类型/账号名称", "data": None}), 400
 
     # 模拟一个用于异步通信的队列
     status_queue = Queue()
-    active_queues[id] = status_queue
+    queue_key = f"{login_type}:{account_id}:{uuid.uuid4().hex[:8]}"
+    with active_queues_lock:
+        active_queues[queue_key] = status_queue
 
-    def on_close():
-        print(f"清理队列: {id}")
-        del active_queues[id]
     # 启动异步任务线程
-    thread = threading.Thread(target=run_async_function, args=(type,id,status_queue), daemon=True)
+    thread = threading.Thread(target=run_async_function, args=(login_type, account_id, status_queue), daemon=True)
     thread.start()
-    response = Response(sse_stream(status_queue,), mimetype='text/event-stream')
+    response = Response(sse_stream(status_queue, queue_key=queue_key), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'  # 关键：禁用 Nginx 缓冲
     response.headers['Content-Type'] = 'text/event-stream'
@@ -681,37 +743,53 @@ def download_cookie():
 
 # 包装函数：在线程中运行异步函数
 def run_async_function(type,id,status_queue):
-    match type:
-        case '1':
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(xiaohongshu_cookie_gen(id, status_queue))
-            loop.close()
-        case '2':
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(get_tencent_cookie(id,status_queue))
-            loop.close()
-        case '3':
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(douyin_cookie_gen(id,status_queue))
-            loop.close()
-        case '4':
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(get_ks_cookie(id,status_queue))
-            loop.close()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        match type:
+            case '1':
+                loop.run_until_complete(xiaohongshu_cookie_gen(id, status_queue))
+            case '2':
+                loop.run_until_complete(get_tencent_cookie(id, status_queue))
+            case '3':
+                loop.run_until_complete(douyin_cookie_gen(id, status_queue))
+            case '4':
+                loop.run_until_complete(get_ks_cookie(id, status_queue))
+            case _:
+                status_queue.put("500")
+    except Exception as e:
+        print(f"❌ 登录任务异常 (type={type}, id={id}): {e}")
+        status_queue.put("500")
+    finally:
+        loop.close()
 
 # SSE 流生成器函数
-def sse_stream(status_queue):
-    while True:
-        if not status_queue.empty():
-            msg = status_queue.get()
-            yield f"data: {msg}\n\n"
-        else:
-            # 避免 CPU 占满
-            time.sleep(0.1)
+def sse_stream(status_queue, queue_key=None, timeout_seconds=240):
+    deadline = time.monotonic() + timeout_seconds
+    last_keepalive = time.monotonic()
+    try:
+        while time.monotonic() < deadline:
+            try:
+                msg = status_queue.get(timeout=0.5)
+            except Empty:
+                if time.monotonic() - last_keepalive >= 15:
+                    yield ": keepalive\n\n"
+                    last_keepalive = time.monotonic()
+                continue
+
+            if msg is None:
+                continue
+            msg_str = str(msg)
+            yield f"data: {msg_str}\n\n"
+            if msg_str in {"200", "500"}:
+                return
+
+        yield "data: 500\n\n"
+    finally:
+        if queue_key:
+            with active_queues_lock:
+                active_queues.pop(queue_key, None)
 
 if __name__ == '__main__':
+    ensure_runtime_ready()
     app.run(host='0.0.0.0' ,port=5409)

@@ -137,7 +137,7 @@ class TencentVideo(object):
 
     async def upload(self, playwright: Playwright) -> None:
         # 使用 Chromium (这里使用系统内浏览器，用chromium 会造成h264错误
-        browser = await playwright.chromium.launch(headless=self.headless, executable_path=self.local_executable_path)
+        browser = await playwright.chromium.launch(headless=self.headless, executable_path=self.local_executable_path or None)
         # 创建一个浏览器上下文，使用指定的 cookie 文件
         context = await browser.new_context(storage_state=f"{self.account_file}")
         context = await set_init_script(context)

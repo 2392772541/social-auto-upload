@@ -66,13 +66,28 @@ def generate_schedule_time_next_day(total_videos, videos_per_day = 1, daily_time
     schedule = []
     current_time = datetime.now()
 
+    parsed_times = []
+    for entry in daily_times:
+        if isinstance(entry, int):
+            hour, minute = entry, 0
+        elif isinstance(entry, str) and ":" in entry:
+            parts = entry.strip().split(":", 1)
+            hour, minute = int(parts[0]), int(parts[1])
+        elif isinstance(entry, str):
+            hour, minute = int(entry.strip()), 0
+        else:
+            raise ValueError(f"Unsupported daily_times entry: {entry!r}")
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError(f"Invalid time in daily_times: {entry!r}")
+        parsed_times.append((hour, minute))
+
     for video in range(total_videos):
         day = video // videos_per_day + start_days + 1  # +1 to start from the next day
         daily_video_index = video % videos_per_day
 
         # Calculate the time for the current video
-        hour = daily_times[daily_video_index]
-        time_offset = timedelta(days=day, hours=hour - current_time.hour, minutes=-current_time.minute,
+        hour, minute = parsed_times[daily_video_index]
+        time_offset = timedelta(days=day, hours=hour - current_time.hour, minutes=minute - current_time.minute,
                                 seconds=-current_time.second, microseconds=-current_time.microsecond)
         timestamp = current_time + time_offset
 

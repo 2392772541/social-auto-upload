@@ -364,8 +364,9 @@
       :title="dialogType === 'add' ? '添加账号' : '编辑账号'"
       width="500px"
       :close-on-click-modal="false"
-      :close-on-press-escape="!sseConnecting"
-      :show-close="!sseConnecting"
+      :close-on-press-escape="true"
+      :show-close="true"
+      @close="handleDialogClose"
     >
       <el-form :model="accountForm" label-width="80px" :rules="rules" ref="accountFormRef">
         <el-form-item label="平台" prop="platform">
@@ -762,13 +763,34 @@ const getDefaultAvatar = (name) => {
 
 // SSE事件源对象
 let eventSource = null
+let qrTimeoutTimer = null
+let totalTimeoutTimer = null
+
+const clearSSETimers = () => {
+  if (qrTimeoutTimer) {
+    clearTimeout(qrTimeoutTimer)
+    qrTimeoutTimer = null
+  }
+  if (totalTimeoutTimer) {
+    clearTimeout(totalTimeoutTimer)
+    totalTimeoutTimer = null
+  }
+}
 
 // 关闭SSE连接
 const closeSSEConnection = () => {
+  clearSSETimers()
   if (eventSource) {
     eventSource.close()
     eventSource = null
   }
+}
+
+const handleDialogClose = () => {
+  closeSSEConnection()
+  sseConnecting.value = false
+  qrCodeData.value = ''
+  loginStatus.value = ''
 }
 
 // 建立SSE连接
@@ -797,14 +819,41 @@ const connectSSE = (platform, name) => {
 
   eventSource = new EventSource(url)
 
+  // 超时兜底：45秒未收到二维码或240秒未完成登录，自动中断避免无限“请求中...”
+  qrTimeoutTimer = setTimeout(() => {
+    if (sseConnecting.value && !qrCodeData.value && !loginStatus.value) {
+      closeSSEConnection()
+      sseConnecting.value = false
+      ElMessage.error('获取登录二维码超时，请关闭弹窗重试一次')
+    }
+  }, 45000)
+
+  totalTimeoutTimer = setTimeout(() => {
+    if (sseConnecting.value && !loginStatus.value) {
+      closeSSEConnection()
+      loginStatus.value = '500'
+      ElMessage.error('扫码登录超时，请重试')
+      setTimeout(() => {
+        sseConnecting.value = false
+        qrCodeData.value = ''
+        loginStatus.value = ''
+      }, 1500)
+    }
+  }, 240000)
+
   // 监听消息
   eventSource.onmessage = (event) => {
-    const data = event.data
+    const data = (event.data || '').trim()
+    if (!data) return
 
     // 如果还没有二维码数据，且数据长度较长，认为是二维码
-    if (!qrCodeData.value && data.length > 100) {
+    if (!qrCodeData.value && data !== '200' && data !== '500' && (data.startsWith('data:image') || data.startsWith('http://') || data.startsWith('https://') || data.length > 100)) {
       try {
-        if (data.startsWith('data:image')) {
+        if (qrTimeoutTimer) {
+          clearTimeout(qrTimeoutTimer)
+          qrTimeoutTimer = null
+        }
+        if (data.startsWith('data:image') || data.startsWith('http://') || data.startsWith('https://')) {
           qrCodeData.value = data
         } else {
           qrCodeData.value = `data:image/png;base64,${data}`
@@ -819,10 +868,8 @@ const connectSSE = (platform, name) => {
 
       // 如果登录成功
       if (data === '200') {
+        closeSSEConnection()
         setTimeout(() => {
-          // 关闭连接
-          closeSSEConnection()
-
           // 1秒后关闭对话框并开始刷新
           setTimeout(() => {
             dialogVisible.value = false

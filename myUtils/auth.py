@@ -6,17 +6,15 @@ from playwright.async_api import async_playwright
 from xhs import XhsClient
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from utils.browser_hook import resolve_chromium_launch_kwargs
 from utils.base_social_media import set_init_script
 from utils.log import tencent_logger, kuaishou_logger, douyin_logger
 from pathlib import Path
 from uploader.xhs_uploader.main import sign_local
 
 
-def _launch_options():
-    options = {"headless": LOCAL_CHROME_HEADLESS}
-    if LOCAL_CHROME_PATH:
-        options["executable_path"] = LOCAL_CHROME_PATH
-    return options
+def _launch_options(playwright=None):
+    return resolve_chromium_launch_kwargs(playwright, headless=LOCAL_CHROME_HEADLESS)
 
 
 async def _safe_close(context, browser):
@@ -34,7 +32,7 @@ async def cookie_auth_douyin(account_file):
     browser = context = None
     async with async_playwright() as playwright:
         try:
-            browser = await playwright.chromium.launch(**_launch_options())
+            browser = await playwright.chromium.launch(**_launch_options(playwright))
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
@@ -61,7 +59,7 @@ async def cookie_auth_tencent(account_file):
     browser = context = None
     async with async_playwright() as playwright:
         try:
-            browser = await playwright.chromium.launch(**_launch_options())
+            browser = await playwright.chromium.launch(**_launch_options(playwright))
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
@@ -83,7 +81,7 @@ async def cookie_auth_ks(account_file):
     browser = context = None
     async with async_playwright() as playwright:
         try:
-            browser = await playwright.chromium.launch(**_launch_options())
+            browser = await playwright.chromium.launch(**_launch_options(playwright))
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
@@ -105,7 +103,7 @@ async def cookie_auth_xhs(account_file):
     browser = context = None
     async with async_playwright() as playwright:
         try:
-            browser = await playwright.chromium.launch(**_launch_options())
+            browser = await playwright.chromium.launch(**_launch_options(playwright))
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()

@@ -73,6 +73,9 @@ async def _open_xhs_qrcode_panel(page: Page) -> None:
     switch_img = login_box.locator(XHS_LOGIN_SWITCH_SELECTOR).first
     await switch_img.wait_for(state="visible", timeout=10000)
     await switch_img.click()
+    await asyncio.sleep(1.5)
+    if await page.get_by_text("当前网络存在风险").count() or await page.get_by_text("安全限制").count():
+        raise RuntimeError("小红书安全限制：当前网络存在风险(300012)，请关闭代理或切换网络后重试")
     await login_box.locator("div:has-text('扫一扫')").first.wait_for(state="visible", timeout=10000)
 
 

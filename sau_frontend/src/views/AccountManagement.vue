@@ -846,8 +846,13 @@ const connectSSE = (platform, name) => {
     const data = (event.data || '').trim()
     if (!data) return
 
+    if (data.startsWith('ERROR:')) {
+      ElMessage.error(data.slice(6) || '登录失败，请稍后重试')
+      return
+    }
+
     // 如果还没有二维码数据，且数据长度较长，认为是二维码
-    if (!qrCodeData.value && data !== '200' && data !== '500' && (data.startsWith('data:image') || data.startsWith('http://') || data.startsWith('https://') || data.length > 100)) {
+    if (data !== '200' && data !== '500' && (data.startsWith('data:image') || data.startsWith('http://') || data.startsWith('https://') || data.length > 100)) {
       try {
         if (qrTimeoutTimer) {
           clearTimeout(qrTimeoutTimer)

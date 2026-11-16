@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sqlite3
 import threading
@@ -44,10 +45,100 @@ def ensure_runtime_ready():
             file_path TEXT
         )
         ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS publish_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform_type INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            file_list TEXT NOT NULL,
+            account_list TEXT NOT NULL,
+            tags TEXT,
+            enable_timer INTEGER DEFAULT 0,
+            schedule_summary TEXT,
+            is_draft INTEGER DEFAULT 0,
+            status TEXT NOT NULL,
+            message TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS title_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT DEFAULT '通用',
+            title TEXT NOT NULL,
+            tags TEXT,
+            note TEXT DEFAULT '',
+            use_count INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        existing_tpl_count = cursor.execute("SELECT COUNT(1) FROM title_templates").fetchone()[0]
+        if existing_tpl_count == 0:
+            seed_templates = [
+                ("干货拆解", "【干货必看】3分钟讲清楚核心逻辑，建议先收藏再慢慢看！", ["干货分享", "效率提升"], "适合知识科普、方法总结类视频"),
+                ("好物测评", "真实体验一周后才敢说实话：到底值不值得入手？", ["好物推荐", "真实测评"], "适合产品开箱、工具对比视频"),
+                ("教程实操", "保姆级手把手教学，跟着做一遍就能学会！", ["教程", "新手必看"], "适合分步教学、软件演示视频"),
+                ("日常Vlog", "记录生活里的小确幸，今天也请继续加油呀！", ["日常", "Vlog"], "适合生活碎片、日常记录"),
+            ]
+            for cat, ttl, tgs, nt in seed_templates:
+                cursor.execute(
+                    "INSERT INTO title_templates (category, title, tags, note) VALUES (?, ?, ?, ?)",
+                    (cat, ttl, json.dumps(tgs, ensure_ascii=False), nt),
+                )
         conn.commit()
 
 
 ensure_runtime_ready()
+
+
+def record_publish_history(
+    platform_type,
+    title,
+    file_list,
+    account_list,
+    tags,
+    enable_timer,
+    videos_per_day,
+    daily_times,
+    start_days,
+    is_draft,
+    status,
+    message='',
+):
+    """Persist publish execution summary so users can inspect & reuse history."""
+    ensure_runtime_ready()
+    schedule_summary = ''
+    if enable_timer:
+        times_text = ', '.join(str(t) for t in (daily_times or []))
+        start_label = '明天' if start_days == 0 else ('后天' if start_days == 1 else f'{start_days}天后')
+        schedule_summary = f'定时({start_label}起，每天{videos_per_day or 1}条 {times_text})'
+    else:
+        schedule_summary = '立即发布'
+
+    db_path = Path(BASE_DIR / "db" / "database.db")
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            INSERT INTO publish_records (
+                platform_type, title, file_list, account_list, tags,
+                enable_timer, schedule_summary, is_draft, status, message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                int(platform_type or 0),
+                str(title or ''),
+                json.dumps(file_list or [], ensure_ascii=False),
+                json.dumps(account_list or [], ensure_ascii=False),
+                json.dumps(tags or [], ensure_ascii=False),
+                1 if enable_timer else 0,
+                schedule_summary,
+                1 if is_draft else 0,
+                status,
+                str(message or ''),
+            ),
+        )
+        conn.commit()
 
 #允许所有来源跨域访问
 CORS(app)
@@ -520,6 +611,11 @@ def postVideo():
                 return jsonify({"code": 400, "msg": f"不支持的平台类型: {type}", "data": None}), 400
 
         # 返回响应给客户端
+        record_publish_history(
+            type, title, file_list, account_list, tags,
+            enableTimer, videos_per_day, daily_times, start_days,
+            is_draft, 'success', '发布任务已提交'
+        )
         return jsonify(
             {
                 "code": 200,
@@ -528,6 +624,14 @@ def postVideo():
             }), 200
     except Exception as e:
         print(f"发布视频时出错: {str(e)}")
+        try:
+            record_publish_history(
+                type, title, file_list, account_list, tags,
+                enableTimer, videos_per_day, daily_times, start_days,
+                is_draft, 'error', str(e)
+            )
+        except Exception:
+            pass
         return jsonify({
             "code": 500,
             "msg": f"发布失败: {str(e)}",
@@ -591,6 +695,7 @@ def postVideoBatch():
             category = None
         productLink = data.get('productLink', '')
         productTitle = data.get('productTitle', '')
+        thumbnail_path = data.get('thumbnail', '')
         is_draft = data.get('isDraft', False)
 
         videos_per_day = data.get('videosPerDay')
@@ -599,19 +704,32 @@ def postVideoBatch():
         # 打印获取到的数据（仅作为示例）
         print("File List:", file_list)
         print("Account List:", account_list)
-        match type:
-            case 1:
-                post_video_xhs(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                               start_days)
-            case 2:
-                post_video_tencent(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                                   start_days, is_draft)
-            case 3:
-                post_video_DouYin(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                          start_days, productLink, productTitle)
-            case 4:
-                post_video_ks(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
-                          start_days)
+        try:
+            match type:
+                case 1:
+                    post_video_xhs(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
+                                   start_days)
+                case 2:
+                    post_video_tencent(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
+                                       start_days, is_draft)
+                case 3:
+                    post_video_DouYin(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
+                              start_days, thumbnail_path, productLink, productTitle)
+                case 4:
+                    post_video_ks(title, file_list, tags, account_list, category, enableTimer, videos_per_day, daily_times,
+                              start_days)
+            record_publish_history(
+                type, title, file_list, account_list, tags,
+                enableTimer, videos_per_day, daily_times, start_days,
+                is_draft, 'success', '批量发布任务已提交'
+            )
+        except Exception as e:
+            record_publish_history(
+                type, title, file_list, account_list, tags,
+                enableTimer, videos_per_day, daily_times, start_days,
+                is_draft, 'error', str(e)
+            )
+            raise
     # 返回响应给客户端
     return jsonify(
         {
@@ -619,6 +737,138 @@ def postVideoBatch():
             "msg": None,
             "data": None
         }), 200
+
+
+@app.route('/getPublishHistory', methods=['GET'])
+def get_publish_history():
+    ensure_runtime_ready()
+    try:
+        raw_limit = int(request.args.get('limit', 50) or 50)
+    except (TypeError, ValueError):
+        raw_limit = 50
+    limit = min(max(raw_limit, 1), 200)
+    platform_map = {1: '小红书', 2: '视频号', 3: '抖音', 4: '快手'}
+    db_path = Path(BASE_DIR / "db" / "database.db")
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            '''
+            SELECT id, platform_type, title, file_list, account_list, tags,
+                   enable_timer, schedule_summary, is_draft, status, message, created_at
+            FROM publish_records
+            ORDER BY id DESC
+            LIMIT ?
+            ''',
+            (limit,),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item['platform_name'] = platform_map.get(item['platform_type'], f"平台({item['platform_type']})")
+        for field in ('file_list', 'account_list', 'tags'):
+            try:
+                item[field] = json.loads(item[field] or '[]')
+            except Exception:
+                item[field] = []
+        result.append(item)
+    return jsonify({"code": 200, "msg": "success", "data": result}), 200
+
+
+@app.route('/deletePublishRecord', methods=['GET'])
+def delete_publish_record():
+    ensure_runtime_ready()
+    record_id = request.args.get('id')
+    if not record_id:
+        return jsonify({"code": 400, "msg": "缺少记录 ID", "data": None}), 400
+    db_path = Path(BASE_DIR / "db" / "database.db")
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM publish_records WHERE id = ?", (record_id,))
+        conn.commit()
+    return jsonify({"code": 200, "msg": "删除成功", "data": None}), 200
+
+
+@app.route('/getTitleTemplates', methods=['GET'])
+def get_title_templates():
+    ensure_runtime_ready()
+    category = (request.args.get('category') or '').strip()
+    keyword = (request.args.get('keyword') or '').strip()
+    db_path = Path(BASE_DIR / "db" / "database.db")
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        sql = "SELECT id, category, title, tags, note, use_count, created_at FROM title_templates WHERE 1=1"
+        params = []
+        if category and category != '全部':
+            sql += " AND category = ?"
+            params.append(category)
+        if keyword:
+            sql += " AND (title LIKE ? OR note LIKE ? OR tags LIKE ?)"
+            like = f"%{keyword}%"
+            params.extend([like, like, like])
+        sql += " ORDER BY id DESC"
+        rows = cursor.execute(sql, params).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item['tags'] = json.loads(item['tags'] or '[]')
+        except Exception:
+            item['tags'] = []
+        items.append(item)
+    return jsonify({"code": 200, "msg": "success", "data": items}), 200
+
+
+@app.route('/saveTitleTemplate', methods=['POST'])
+def save_title_template():
+    ensure_runtime_ready()
+    data = request.get_json(silent=True) or {}
+    tpl_id = data.get('id')
+    category = str(data.get('category') or '通用').strip() or '通用'
+    title = str(data.get('title') or '').strip()
+    note = str(data.get('note') or '').strip()
+    raw_tags = data.get('tags') or []
+    if isinstance(raw_tags, str):
+        tags = [t.strip().lstrip('#') for t in raw_tags.replace('，', ',').split(',') if t.strip()]
+    elif isinstance(raw_tags, list):
+        tags = [str(t).strip().lstrip('#') for t in raw_tags if str(t).strip()]
+    else:
+        tags = []
+
+    if not title:
+        return jsonify({"code": 400, "msg": "标题内容不能为空", "data": None}), 400
+
+    db_path = Path(BASE_DIR / "db" / "database.db")
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        if tpl_id:
+            cursor.execute(
+                "UPDATE title_templates SET category = ?, title = ?, tags = ?, note = ? WHERE id = ?",
+                (category, title, json.dumps(tags, ensure_ascii=False), note, tpl_id),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO title_templates (category, title, tags, note) VALUES (?, ?, ?, ?)",
+                (category, title, json.dumps(tags, ensure_ascii=False), note),
+            )
+            tpl_id = cursor.lastrowid
+        conn.commit()
+    return jsonify({"code": 200, "msg": "保存成功", "data": {"id": tpl_id}}), 200
+
+
+@app.route('/deleteTitleTemplate', methods=['GET'])
+def delete_title_template():
+    ensure_runtime_ready()
+    tpl_id = request.args.get('id')
+    if not tpl_id:
+        return jsonify({"code": 400, "msg": "缺少模板 ID", "data": None}), 400
+    db_path = Path(BASE_DIR / "db" / "database.db")
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM title_templates WHERE id = ?", (tpl_id,))
+        conn.commit()
+    return jsonify({"code": 200, "msg": "删除成功", "data": None}), 200
 
 # Cookie文件上传API
 @app.route('/uploadCookie', methods=['POST'])

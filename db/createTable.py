@@ -34,6 +34,35 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS file_records (
 )
 ''')
 
+# 创建发布历史记录表
+cursor.execute('''CREATE TABLE IF NOT EXISTS publish_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform_type INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    file_list TEXT NOT NULL,
+    account_list TEXT NOT NULL,
+    tags TEXT,
+    enable_timer INTEGER DEFAULT 0,
+    schedule_summary TEXT,
+    is_draft INTEGER DEFAULT 0,
+    status TEXT NOT NULL,
+    message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+''')
+
+# 创建标题文案模板库表
+cursor.execute('''CREATE TABLE IF NOT EXISTS title_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT DEFAULT '通用',
+    title TEXT NOT NULL,
+    tags TEXT,
+    note TEXT DEFAULT '',
+    use_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+''')
+
 
 # 提交更改
 conn.commit()

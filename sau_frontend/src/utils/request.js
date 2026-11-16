@@ -40,6 +40,9 @@ request.interceptors.response.use(
   },
   (error) => {
     console.error('响应错误:', error)
+    if (error.config?.silent) {
+      return Promise.reject(error)
+    }
     
     // 处理HTTP错误状态码
     if (error.response) {
@@ -71,8 +74,8 @@ request.interceptors.response.use(
 
 // 封装常用的请求方法
 export const http = {
-  get(url, params) {
-    return request.get(url, { params })
+  get(url, params, config = {}) {
+    return request.get(url, { params, ...config })
   },
   
   post(url, data, config = {}) {

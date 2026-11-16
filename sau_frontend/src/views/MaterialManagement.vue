@@ -1,57 +1,96 @@
 <template>
   <div class="material-management">
-    <div class="page-header">
-      <h1>素材管理</h1>
+    <div class="studio-page-header">
+      <div class="header-titles">
+        <h1>素材管理</h1>
+        <p>集中管理本地视频与图文素材，支持批量上传与在线预览</p>
+      </div>
+      <div class="header-actions">
+        <el-button @click="fetchMaterials" :disabled="isRefreshing">
+          <el-icon :class="{ 'is-loading': isRefreshing }"><Refresh /></el-icon>
+          <span>{{ isRefreshing ? '刷新中...' : '刷新列表' }}</span>
+        </el-button>
+        <el-button type="primary" @click="handleUploadMaterial">
+          <el-icon><Upload /></el-icon>
+          <span>上传素材</span>
+        </el-button>
+      </div>
     </div>
-    
-    <div class="material-list-container">
+
+    <el-card class="material-card" shadow="never">
       <div class="material-search">
+        <div class="search-summary">
+          <span class="count-pill">共 {{ filteredMaterials.length }} 个素材</span>
+        </div>
         <el-input
           v-model="searchKeyword"
-          placeholder="输入文件名搜索"
+          placeholder="搜索素材文件名..."
           prefix-icon="Search"
           clearable
           @clear="handleSearch"
           @input="handleSearch"
+          class="search-input"
         />
-        <div class="action-buttons">
-          <el-button type="primary" @click="handleUploadMaterial">上传素材</el-button>
-          <el-button type="info" @click="fetchMaterials" :loading="false">
-            <el-icon :class="{ 'is-loading': isRefreshing }"><Refresh /></el-icon>
-            <span v-if="isRefreshing">刷新中</span>
-          </el-button>
-        </div>
       </div>
-      
+
       <div v-if="filteredMaterials.length > 0" class="material-list">
         <el-table :data="filteredMaterials" style="width: 100%">
-          <el-table-column prop="uuid" label="UUID" width="180" />
-          <el-table-column prop="filename" label="文件名" width="300" />
+          <el-table-column label="素材文件" min-width="280">
+            <template #default="scope">
+              <div class="material-cell">
+                <div :class="['file-type-icon', isVideoFile(scope.row.filename) ? 'video' : isImageFile(scope.row.filename) ? 'image' : 'other']">
+                  <el-icon v-if="isVideoFile(scope.row.filename)"><VideoCamera /></el-icon>
+                  <el-icon v-else-if="isImageFile(scope.row.filename)"><Picture /></el-icon>
+                  <el-icon v-else><Document /></el-icon>
+                </div>
+                <div class="material-meta">
+                  <div class="material-filename">{{ scope.row.filename }}</div>
+                  <div class="material-uuid">UUID: {{ scope.row.uuid }}</div>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="100">
+            <template #default="scope">
+              <el-tag
+                :type="isVideoFile(scope.row.filename) ? 'success' : isImageFile(scope.row.filename) ? 'warning' : 'info'"
+                effect="light"
+                size="small"
+              >
+                {{ isVideoFile(scope.row.filename) ? '视频' : isImageFile(scope.row.filename) ? '图片' : '其他' }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="filesize" label="文件大小" width="120">
             <template #default="scope">
-              {{ scope.row.filesize }} MB
+              <span class="tabular-num">{{ scope.row.filesize }} MB</span>
             </template>
           </el-table-column>
           <el-table-column prop="upload_time" label="上传时间" width="180" />
-          <el-table-column label="操作">
+          <el-table-column label="操作" width="170" align="right">
             <template #default="scope">
-              <el-button size="small" @click="handlePreview(scope.row)">预览</el-button>
-              <el-button size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
+              <el-button size="small" type="primary" plain @click="handlePreview(scope.row)">预览</el-button>
+              <el-button size="small" type="danger" plain @click="handleDelete(scope.row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
       </div>
-      
+
       <div v-else class="empty-data">
-        <el-empty description="暂无素材数据" />
+        <el-empty description="暂无素材数据，点击上方或下方按钮上传" :image-size="96">
+          <el-button type="primary" @click="handleUploadMaterial">
+            <el-icon><Upload /></el-icon>
+            <span>上传首个素材</span>
+          </el-button>
+        </el-empty>
       </div>
-    </div>
+    </el-card>
     
     <!-- 上传对话框 -->
     <el-dialog
       v-model="uploadDialogVisible"
       title="上传素材"
-      width="40%"
+      width="560px"
       @close="handleUploadDialogClose"
     >
       <div class="upload-form">
@@ -142,7 +181,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { Refresh, Upload } from '@element-plus/icons-vue'
+import { Refresh, Upload, VideoCamera, Picture, Document } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { materialApi } from '@/api/material'
 import { useAppStore } from '@/stores/app'
@@ -405,50 +444,110 @@ onMounted(() => {
 }
 
 .material-management {
-  
-  .page-header {
-    margin-bottom: 20px;
-    
-    h1 {
-      font-size: 24px;
-      font-weight: 500;
-      color: $text-primary;
-      margin: 0;
+  .header-actions {
+    display: flex;
+    gap: 10px;
+
+    .el-icon {
+      margin-right: 4px;
+
+      &.is-loading {
+        animation: rotate 1s linear infinite;
+      }
     }
   }
-  
-  .material-list-container {
-    background-color: #fff;
-    border-radius: 4px;
-    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-    padding: 20px;
-    
+
+  .material-card {
+    :deep(.el-card__body) {
+      padding: 20px 22px;
+    }
+
     .material-search {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
-      
-      .el-input {
-        width: 300px;
+      gap: 12px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+
+      .count-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        background: #f1f5f9;
+        color: $text-regular;
       }
-      
-      .action-buttons {
+
+      .search-input {
+        width: 280px;
+        max-width: 100%;
+      }
+    }
+
+    .material-cell {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      .file-type-icon {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
         display: flex;
-        gap: 10px;
-        
-        .is-loading {
-          animation: rotate 1s linear infinite;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+
+        &.video {
+          background: rgba($success-color, 0.12);
+          color: $success-color;
+        }
+
+        &.image {
+          background: rgba($warning-color, 0.14);
+          color: $warning-color;
+        }
+
+        &.other {
+          background: rgba($info-color, 0.12);
+          color: $info-color;
+        }
+      }
+
+      .material-meta {
+        min-width: 0;
+
+        .material-filename {
+          font-weight: 600;
+          font-size: 14px;
+          color: $text-primary;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .material-uuid {
+          font-size: 12px;
+          color: $text-secondary;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         }
       }
     }
-    
-    .material-list {
-      margin-top: 20px;
+
+    .tabular-num {
+      font-variant-numeric: tabular-nums;
     }
-    
+
     .empty-data {
-      padding: 40px 0;
+      padding: 48px 0;
+
+      .el-icon {
+        margin-right: 4px;
+      }
     }
   }
   
@@ -461,17 +560,22 @@ onMounted(() => {
     justify-content: center;
     align-items: center;
     flex-direction: column;
-    padding: 0 20px;
+    padding: 4px 0;
     
     .file-info {
       text-align: center;
       margin-top: 20px;
+
+      p {
+        margin-bottom: 8px;
+        color: $text-regular;
+      }
     }
   }
 }
 
 .upload-form {
-  padding: 0 20px;
+  padding: 0 4px;
   
   .form-tip {
     font-size: 12px;
@@ -485,9 +589,9 @@ onMounted(() => {
 }
 
 .dialog-footer {
-  padding: 0 20px;
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .upload-file-list {
@@ -509,21 +613,6 @@ onMounted(() => {
 }
 
 /* 覆盖Element Plus对话框样式 */
-:deep(.el-dialog__body) {
-  padding: 20px 0;
-}
-
-:deep(.el-dialog__header) {
-  padding-left: 20px;
-  padding-right: 20px;
-  margin-right: 0;
-}
-
-:deep(.el-dialog__footer) {
-  padding-top: 10px;
-  padding-bottom: 15px;
-}
-
 /* 修改上传进度条样式 */
 :deep(.el-progress__text) {
   color: #303133 !important; /* 深灰色字体，确保在各种背景上都可见 */
@@ -535,11 +624,11 @@ onMounted(() => {
 }
 
 .upload-file-item {
-  border: 1px solid #dcdfe6;
-  border-radius: 6px; /* 增加圆角 */
+  border: 1px solid $border-light;
+  border-radius: 10px;
   padding: 12px; /* 增加内边距 */
   margin-bottom: 12px; /* 增加外边距 */
-  background-color: #fafafa; /* 轻微背景色 */
+  background-color: #f8fafc;
   transition: box-shadow 0.3s; /* 添加过渡效果 */
 }
 

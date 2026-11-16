@@ -1,5 +1,12 @@
 <template>
   <div class="publish-center">
+    <div class="studio-page-header">
+      <div class="header-titles">
+        <h1>发布中心</h1>
+        <p>支持多任务并行编辑、素材库直选、话题标签与定时分发</p>
+      </div>
+    </div>
+
     <!-- Tab管理区域 -->
     <div class="tab-management">
       <div class="tab-header">
@@ -474,14 +481,13 @@
 
           <!-- 操作按钮 -->
           <div class="action-buttons">
-            <el-button size="small" @click="cancelPublish(tab)">取消</el-button>
+            <el-button @click="cancelPublish(tab)">清空重置</el-button>
             <el-button
-              size="small"
               type="primary"
               @click="confirmPublish(tab)"
               :loading="tab.publishing || false"
             >
-              {{ tab.publishing ? '发布中...' : '发布' }}
+              {{ tab.publishing ? '发布中...' : '立即提交发布' }}
             </el-button>
           </div>
         </div>
@@ -1009,10 +1015,11 @@ const batchPublish = async () => {
   // Tab管理区域
   .tab-management {
     background-color: #fff;
-    border-radius: 4px;
-    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-    margin-bottom: 20px;
-    padding: 15px 20px;
+    border-radius: $border-radius-lg;
+    border: 1px solid $border-light;
+    box-shadow: $box-shadow-light;
+    margin-bottom: 18px;
+    padding: 14px 18px;
     
     .tab-header {
       display: flex;
@@ -1022,32 +1029,36 @@ const batchPublish = async () => {
       .tab-list {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
         flex: 1;
         min-width: 0;
         
         .tab-item {
            display: flex;
            align-items: center;
-           gap: 6px;
-           padding: 6px 12px;
-           background-color: #f5f7fa;
-           border: 1px solid #dcdfe6;
-           border-radius: 4px;
+           gap: 8px;
+           padding: 6px 14px;
+           background-color: #f8fafc;
+           border: 1px solid $border-light;
+           border-radius: 9px;
            cursor: pointer;
-           transition: all 0.3s;
-           font-size: 14px;
-           height: 32px;
+           transition: all 0.18s ease;
+           font-size: 13px;
+           font-weight: 500;
+           color: $text-regular;
+           height: 34px;
            
            &:hover {
-             background-color: #ecf5ff;
-             border-color: #b3d8ff;
+             background-color: $primary-light;
+             border-color: rgba($primary-color, 0.3);
+             color: $primary-color;
            }
            
            &.active {
-             background-color: #409eff;
-             border-color: #409eff;
+             background: linear-gradient(135deg, #4f46e5, #6366f1);
+             border-color: transparent;
              color: #fff;
+             box-shadow: 0 4px 10px -2px rgba($primary-color, 0.45);
              
              .close-icon {
                color: #fff;
@@ -1150,9 +1161,10 @@ const batchPublish = async () => {
   .publish-content {
     flex: 1;
     background-color: #fff;
-    border-radius: 4px;
-    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-    padding: 20px;
+    border-radius: $border-radius-lg;
+    border: 1px solid $border-light;
+    box-shadow: $box-shadow-light;
+    padding: 28px 32px;
     
     .tab-content-wrapper {
       display: flex;
@@ -1160,13 +1172,25 @@ const batchPublish = async () => {
       
       .tab-content {
         width: 100%;
-        max-width: 800px;
+        max-width: 880px;
         
         h3 {
-          font-size: 16px;
-          font-weight: 500;
+          font-size: 15px;
+          font-weight: 600;
           color: $text-primary;
-          margin: 0 0 10px 0;
+          margin: 0 0 12px 0;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+
+          &::before {
+            content: '';
+            width: 3px;
+            height: 15px;
+            border-radius: 999px;
+            background: $primary-color;
+            display: inline-block;
+          }
         }
         
         .upload-section,
@@ -1176,13 +1200,17 @@ const batchPublish = async () => {
         .product-section,
         .topic-section,
         .schedule-section {
-          margin-bottom: 30px;
+          margin-bottom: 22px;
+          padding: 18px 20px;
+          border-radius: 12px;
+          background: #f8fafc;
+          border: 1px solid $border-lighter;
         }
 
         .product-section {
           .product-name-input,
           .product-link-input {
-            margin-bottom: 5px;
+            margin-bottom: 8px;
           }
         }
         
@@ -1240,10 +1268,11 @@ const batchPublish = async () => {
           gap: 15px;
 
           .schedule-settings {
-            margin-top: 15px;
+            margin-top: 8px;
             padding: 15px;
-            background-color: #f5f7fa;
-            border-radius: 4px;
+            background-color: #ffffff;
+            border: 1px solid $border-light;
+            border-radius: 10px;
 
             .schedule-item {
               display: flex;
@@ -1273,10 +1302,10 @@ const batchPublish = async () => {
         .action-buttons {
           display: flex;
           justify-content: flex-end;
-          gap: 10px;
-          margin-top: 30px;
+          gap: 12px;
+          margin-top: 24px;
           padding-top: 20px;
-          border-top: 1px solid #ebeef5;
+          border-top: 1px solid $border-light;
         }
 
         .draft-section {
@@ -1320,8 +1349,9 @@ const batchPublish = async () => {
         display: flex;
         align-items: center;
         padding: 10px 15px;
-        background-color: #f5f7fa;
-        border-radius: 4px;
+        background-color: #ffffff;
+        border: 1px solid $border-light;
+        border-radius: 10px;
         
         .el-link {
           margin-right: 10px;
@@ -1379,8 +1409,8 @@ const batchPublish = async () => {
             justify-content: center;
             
             &.el-button--primary {
-              background-color: #409eff;
-              border-color: #409eff;
+              background-color: $primary-color;
+              border-color: $primary-color;
               color: white;
             }
           }
